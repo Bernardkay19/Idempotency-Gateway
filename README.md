@@ -1,81 +1,78 @@
 # Idempotency-Gateway (The "Pay-Once" Protocol) 🚀
 
-A robust, production-ready REST API middleware for FinSafe that ensures payment requests are processed exactly once, solving the critical issue of double-charging customers due to network timeouts.
+A robust, highly scalable REST API middleware for FinSafe that ensures payment requests are processed exactly once, solving the critical issue of double-charging customers due to network timeouts. 
 
-## 🏗️ Architecture Design
+This upgraded iteration is built entirely on **Redis**, transforming the architecture from a single-node in-memory application to a highly available, horizontally scalable distributed system!
 
-The application serves as a gateway to intercept payment requests, validate idempotency keys, and elegantly handle race conditions (in-flight identical requests) using concurrent cache structures natively.
+## 🏗️ Architecture Design (Redis Migration)
+
+The application uses Redis as the centralized source of truth for idempotency and concurrency locks.
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant Idempotency Gateway
-    participant Cache (Caffeine)
+    participant Redis Cache
     participant Payment Logic
 
     Client->>Idempotency Gateway: POST /process-payment (Idempotency-Key: X)
-    Idempotency Gateway->>Cache: putIfAbsent(X, Future)
+    Idempotency Gateway->>Redis Cache: setIfAbsent(X, status=IN_PROGRESS)
     
-    alt Key already exists
-        Idempotency Gateway->>Cache: Check Payload matches?
-        alt Payload mismatch
-            Cache-->>Idempotency Gateway: Error
-            Idempotency Gateway-->>Client: 409 Conflict (Different Request Body)
-        else Payload matches (In-Flight / Cached)
-            Idempotency Gateway->>Cache: future.get() [Blocks if still in-flight]
-            Cache-->>Idempotency Gateway: Previous Response
-            Idempotency Gateway-->>Client: 200 OK (X-Cache-Hit: true)
-        end
-    else New Key (First Request)
+    alt Acquired Lock (First Request)
         Idempotency Gateway->>Payment Logic: Execute Payment (2-sec delay)
         Payment Logic-->>Idempotency Gateway: Payment Success Result
-        Idempotency Gateway->>Cache: future.complete(Result)
+        Idempotency Gateway->>Redis Cache: set(X, status=COMPLETED, Response)
         Idempotency Gateway-->>Client: 200 OK
+    else Lock Failed (Key exists)
+        Idempotency Gateway->>Redis Cache: Check Payload matches?
+        alt Payload mismatch
+            Idempotency Gateway-->>Client: 409 Conflict (Different Request Body)
+        else Payload matches (In-Flight / Cached)
+            loop Smart Polling
+                Idempotency Gateway->>Redis Cache: get(X)
+                alt if IN_PROGRESS
+                    Idempotency Gateway->>Idempotency Gateway: Wait 100ms
+                else if COMPLETED
+                    Idempotency Gateway-->>Client: 200 OK (X-Cache-Hit: true)
+                end
+            end
+        end
     end
 ```
 
-## ✨ The Developer's Choice Challenge
+## ✨ The "Extraordinary" Developer's Choice Challenge
 
-### Feature: Cache TTL (Time-To-Live) and Eviction Strategy
-**Why?** In a real-world Fintech system, storing millions of idempotency keys in memory indefinitely will inevitably lead to an `OutOfMemoryError`. 
+### Feature: Distributed Fixed-Window Rate Limiter
+**Why?** In a real-world Fintech ecosystem, you must protect your underlying payment processor from DDoS attacks, runaway client scripts, or malicious actors. A simple gateway without rate limiting is a sitting duck.
 
-**Implementation**: I used **Caffeine Cache**, a high-performance Java caching library. It natively supports atomic operations (to solve the race-condition Bonus Story) and provides an eviction strategy. The cache is configured with:
-- `expireAfterWrite(24, TimeUnit.HOURS)`: Idempotency keys expire after 24 hours, keeping memory footprint lean.
-- `maximumSize(100_000)`: A hard cap to ensure safety during sudden traffic spikes.
+**Implementation**: I built a highly-performant **Rate Limiter** natively using Redis intercepts. It restricts clients to a maximum of `100 requests per minute` based on their Client IP. If they exceed the limit, the Gateway intercepts the request at the very edge, immediately returning a `429 Too Many Requests` response before any heavy payload validation, idempotency checks, or payment logic are even executed. 
 
 ## 🌟 The Bonus Story: In-Flight Check (Race Conditions)
 If `Request A` and `Request B` arrive simultaneously with the same `Idempotency-Key`:
-The system stores a wrapper object containing a `CompletableFuture`. The atomic `putIfAbsent` operation guarantees only the first request initializes the payment processing thread. The second request gracefully hits `future.get()` and waits (blocks) until the first request completes, returning identical data to both without executing the payment twice.
+The atomic Redis `setIfAbsent` (SETNX) guarantees only one request becomes the "processor". The second request fails to acquire the lock and elegantly enters a **Smart Polling Loop**. It checks Redis every 100 milliseconds to see if the state has transitioned from `IN_PROGRESS` to `COMPLETED`. Once completed, it intercepts the cached response and returns it without executing the payment logic twice.
 
 ---
 
 ## 🛠️ Tech Stack
 - **Java 17** ☕ (LTS stability)
 - **Spring Boot 3.x** 🌱 (Web, Validation, Actuator)
+- **Redis** 🐘 (Distributed Locking, State, Rate Limiting)
 - **Gradle** 🐘
-- **Caffeine Cache** ☕ (High performance in-memory caching)
-- **Docker** 🐳 (Multi-stage build for Render deployment)
+- **Docker Compose** 🐳 (Local dev environment)
+- **Render** ☁️ (Cloud deployment)
 
 ---
 
 ## 🚀 Setup & Run Instructions
 
 ### Prerequisites
-- JDK 17
-- Docker (optional)
+- Docker & Docker Compose
 
-### Running Locally (Gradle)
+### Running Locally (The Best Way)
 ```bash
-./gradlew bootRun
+docker-compose up --build
 ```
-
-### Running with Docker (Production Ready)
-```bash
-docker build -t idempotency-gateway .
-docker run -p 8080:8080 idempotency-gateway
-```
-
-The server will be available at `http://localhost:8080`
+This single command spins up both the **Redis** container and the **Gateway Application**. The server will be available at `http://localhost:8080`.
 
 ---
 
@@ -145,4 +142,12 @@ curl -X POST http://localhost:8080/process-payment \
   "error": "Conflict",
   "message": "Idempotency key already used for a different request body."
 }
+```
+
+**4. Rate Limiting Check (DDoS Protection)**
+If you spam the endpoint > 100 times in a minute:
+*Response: 429 Too Many Requests*
+```http
+HTTP/1.1 429 Too Many Requests
+Too Many Requests - Rate Limit Exceeded
 ```
