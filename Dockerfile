@@ -1,10 +1,12 @@
 # Stage 1: Build the application
-FROM gradle:8.7-jdk17 AS builder
+FROM eclipse-temurin:17-jdk-alpine AS builder
 WORKDIR /app
+COPY gradlew .
+COPY gradle gradle
 COPY build.gradle settings.gradle /app/
-COPY gradle /app/gradle
-COPY src /app/src
-RUN gradle build -x test --no-daemon
+COPY src src
+RUN chmod +x gradlew
+RUN ./gradlew build -x test --no-daemon
 
 # Stage 2: Create the minimal runtime image
 FROM eclipse-temurin:17-jre-alpine
