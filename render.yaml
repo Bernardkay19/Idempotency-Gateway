@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: idempotency-gateway
+    env: docker
+    plan: free
+    region: frankfurt # Can be customized based on proximity
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: PORT
+        value: 8080
