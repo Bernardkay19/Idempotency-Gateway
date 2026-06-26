@@ -1,10 +1,24 @@
 services:
+  - type: redis
+    name: idempotency-redis
+    plan: free
+    region: frankfurt
+
   - type: web
     name: idempotency-gateway
     env: docker
     plan: free
-    region: frankfurt # Can be customized based on proximity
-    healthCheckPath: /actuator/health
+    region: frankfurt
     envVars:
       - key: PORT
         value: 8080
+      - key: REDIS_HOST
+        fromService:
+          type: redis
+          name: idempotency-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: redis
+          name: idempotency-redis
+          property: port
