@@ -8,15 +8,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import java.util.concurrent.TimeUnit;
+import java.time.Duration;
 
 @Component
 @RequiredArgsConstructor
 public class RateLimitInterceptor implements HandlerInterceptor {
 
     private final StringRedisTemplate stringRedisTemplate;
-    
-    // Allow 100 requests per minute per IP
     private static final int MAX_REQUESTS_PER_MINUTE = 100;
 
     @Override
@@ -26,15 +24,23 @@ public class RateLimitInterceptor implements HandlerInterceptor {
 
         Long requests = stringRedisTemplate.opsForValue().increment(key);
         
-        // If it's the first request in the window, set the expiry
-        if (requests != null && requests == 1L) {
-            stringRedisTemplate.expire(key, 1, TimeUnit.MINUTES);
-        }
+        if (requests != null) {
+            // Updated to Duration.ofMinutes(1) to resolve the deprecation warning
+            if (requests == 1L) {
+                stringRedisTemplate.expire(key, Duration.ofMinutes(1));
+            } else {
+                Long ttl = stringRedisTemplate.getExpire(key);
+                if (ttl != null && ttl == -1L) {
+                    stringRedisTemplate.expire(key, Duration.ofMinutes(1));
+                }
+            }
 
-        if (requests != null && requests > MAX_REQUESTS_PER_MINUTE) {
-            response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
-            response.getWriter().write("Too Many Requests - Rate Limit Exceeded");
-            return false;
+            if (requests > MAX_REQUESTS_PER_MINUTE) {
+                response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+                response.setContentType("text/plain");
+                response.getWriter().write("Too Many Requests - Rate Limit Exceeded");
+                return false;
+            }
         }
 
         return true;

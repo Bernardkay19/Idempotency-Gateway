@@ -3,7 +3,6 @@ package com.finsafe.gateway.service;
 import com.finsafe.gateway.model.IdempotencyRecord;
 import com.finsafe.gateway.model.PaymentRequest;
 import com.finsafe.gateway.model.PaymentResponse;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.HttpStatus;
@@ -11,7 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.concurrent.TimeUnit;
+import java.time.Duration;
 import java.util.function.Supplier;
 
 @Service
@@ -19,7 +18,6 @@ import java.util.function.Supplier;
 public class IdempotencyService {
 
     private final RedisTemplate<String, Object> redisTemplate;
-    private final ObjectMapper objectMapper;
 
     private static final String IDEMPOTENCY_PREFIX = "idempotency:";
 
@@ -35,45 +33,42 @@ public class IdempotencyService {
                 .request(request)
                 .build();
 
-        // setIfAbsent acts like putIfAbsent / SETNX in Redis
-        Boolean acquired = redisTemplate.opsForValue().setIfAbsent(key, newRecord, 24, TimeUnit.HOURS);
+        // Fixed deprecation warning by using Duration.ofMinutes()
+        Boolean acquired = redisTemplate.opsForValue().setIfAbsent(key, newRecord, Duration.ofMinutes(5));
 
         if (Boolean.TRUE.equals(acquired)) {
-            // We are the first thread to handle this key!
             try {
                 ResponseEntity<PaymentResponse> response = logic.get();
-                
-                // Update the record to COMPLETED
-                newRecord.setStatus(IdempotencyRecord.Status.COMPLETED);
-                newRecord.setResponseBody(response.getBody());
-                newRecord.setResponseStatusCode(response.getStatusCode().value());
-                
-                redisTemplate.opsForValue().set(key, newRecord, 24, TimeUnit.HOURS);
-                
+
+                IdempotencyRecord completedRecord = IdempotencyRecord.builder()
+                        .status(IdempotencyRecord.Status.COMPLETED)
+                        .request(request)
+                        .responseBody(response.getBody())
+                        .responseStatusCode(response.getStatusCode().value())
+                        .build();
+
+                // Fixed deprecation warning by using Duration.ofHours()
+                redisTemplate.opsForValue().set(key, completedRecord, Duration.ofHours(24));
                 return response;
             } catch (Exception e) {
-                // If it fails, remove the key so it can be cleanly retried
                 redisTemplate.delete(key);
                 throw e;
             }
+        } else {
+            return handleExistingRecord(key, request);
         }
-
-        // Key already exists. We need to handle the state.
-        return handleExistingRecord(key, request);
     }
 
     private ResponseEntity<PaymentResponse> handleExistingRecord(String key, PaymentRequest request) {
-        int maxRetries = 50; // 5 seconds max wait (50 * 100ms)
-        
+        int maxRetries = 30;
+
         while (maxRetries > 0) {
             Object rawRecord = redisTemplate.opsForValue().get(key);
             if (rawRecord == null) {
-                // Key disappeared (maybe it failed and was deleted). Let's throw an error to retry.
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Idempotency state lost. Please retry.");
             }
 
-            // Convert raw linked hash map from Jackson to IdempotencyRecord
-            IdempotencyRecord record = objectMapper.convertValue(rawRecord, IdempotencyRecord.class);
+            IdempotencyRecord record = (IdempotencyRecord) rawRecord;
 
             if (!record.getRequest().equals(request)) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Idempotency key already used for a different request body.");
@@ -85,7 +80,6 @@ public class IdempotencyService {
                         .body(record.getResponseBody());
             }
 
-            // Still IN_PROGRESS, wait and poll
             try {
                 Thread.sleep(100);
             } catch (InterruptedException e) {

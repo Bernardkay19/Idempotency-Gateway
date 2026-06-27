@@ -9,9 +9,6 @@ version = '0.0.1-SNAPSHOT'
 description = 'Idempotency-Gateway'
 
 java {
-	toolchain {
-		languageVersion = JavaLanguageVersion.of(17)
-	}
 }
 
 repositories {
