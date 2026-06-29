@@ -22,7 +22,7 @@ public class PaymentController {
         return idempotencyService.processIdempotentRequest(idempotencyKey, request, () -> {
             try {
                 // Simulate processing delay
-                Thread.sleep(20000);
+                Thread.sleep(2000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException("Processing interrupted", e);
