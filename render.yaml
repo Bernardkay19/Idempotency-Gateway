@@ -4,6 +4,10 @@ services:
     plan: free
     region: frankfurt
 
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Allow connections
+
   - type: web
     name: idempotency-gateway
     env: docker
