@@ -15,7 +15,7 @@ import java.time.Duration;
 public class RateLimitInterceptor implements HandlerInterceptor {
 
     private final StringRedisTemplate stringRedisTemplate;
-    private static final int MAX_REQUESTS_PER_MINUTE = 100;
+    private static final int MAX_REQUESTS_PER_MINUTE = 5;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {

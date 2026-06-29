@@ -81,7 +81,7 @@ public class IdempotencyService {
             }
 
             try {
-                Thread.sleep(100);
+                Thread.sleep(2000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Polling interrupted");

@@ -1,11 +1,10 @@
 package com.finsafe.gateway.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 @Configuration
@@ -20,7 +19,7 @@ public class RedisConfig {
         template.setHashKeySerializer(new StringRedisSerializer());
         
         // Use the configured GenericJackson2JsonRedisSerializer which automatically sets up a secure ObjectMapper with typing
-        GenericJackson2JsonRedisSerializer jsonSerializer = new GenericJackson2JsonRedisSerializer();
+        RedisSerializer<Object> jsonSerializer = RedisSerializer.json();
         template.setValueSerializer(jsonSerializer);
         template.setHashValueSerializer(jsonSerializer);
         
